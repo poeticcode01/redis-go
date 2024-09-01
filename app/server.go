@@ -4,42 +4,51 @@ import (
 	"fmt"
 	"net"
 	"os"
+
+	"github.com/codecrafters-io/redis-starter-go/app/commands"
 )
 
-func  handleClient(conn net.Conn){
+const (
+	ClrfDelimeter = "\r\n"
+)
+
+func handleClient(conn net.Conn) {
 	// ensure we close the connection after we're done
 	defer conn.Close()
 
 	// Read data
 	for {
-		buf := make([]byte,1024)
-		n,err := conn.Read(buf)
+		buf := make([]byte, 1024)
+		_, err := conn.Read(buf)
 
-		if err != nil{
-			fmt.Println("Error reading data from  the client",err.Error())
+		if err != nil {
+			fmt.Println("Error reading data from  the client", err.Error())
 			return
 		}
-		fmt.Println("Received data",string(buf[:n]))
 
+		input_buf := string(buf)
+		output, err := commands.Execute(input_buf)
+		fmt.Println("Output string is", output)
 
-		message := []byte("+PONG\r\n")
-		n,err = conn.Write(message)
+		if err != nil {
+			fmt.Println("Error executing command: ", err.Error())
+		}
 
-		if err != nil{
-			fmt.Println("Error sending message to the  client",err.Error())
+		// message := []byte("+PONG\r\n")
+		_, err = conn.Write([]byte(output))
+
+		if err != nil {
+			fmt.Println("Error sending message to the  client", err.Error())
 			return
 		}
-		fmt.Printf("send %d bytes",n)
+		// fmt.Printf("send %d bytes", n)
 
 	}
-	
-
-
 
 }
 
 func main() {
-	
+
 	listener, err := net.Listen("tcp", "0.0.0.0:6379")
 	if err != nil {
 		fmt.Println("Failed to bind to port 6379")
@@ -50,9 +59,9 @@ func main() {
 
 	fmt.Println("Server is listening on port 6379")
 	// Block until we receive an incoming connection
-	
+
 	for {
-		
+
 		conn, err := listener.Accept()
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
@@ -62,8 +71,6 @@ func main() {
 		// Hnadle client connection
 		go handleClient(conn)
 
-		
 	}
-	
 
 }
