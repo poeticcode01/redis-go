@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	"github.com/codecrafters-io/redis-starter-go/app/hashtable"
 )
 
 const (
@@ -32,6 +34,11 @@ func Execute(input_buf string) (string, error) {
 		cmd = &Ping{}
 	case "echo":
 		cmd = &Echo{}
+	case "set":
+		cmd = &Set{}
+	case "get":
+		cmd = &Get{}
+
 	}
 
 	return (cmd).Run(command_slice[1:])
@@ -42,12 +49,12 @@ type Echo struct{}
 
 func (*Echo) Run(input []string) (string, error) {
 	if len(input) == 1 {
-		bulk := &BulkString{Content: input[0]}
+		bulk := &BulkString{Content: &input[0]}
 		return bulk.Encode(), nil
 	}
 	arr := make([]*BulkString, 0, len(input))
 	for _, v := range input {
-		arr = append(arr, &BulkString{Content: v})
+		arr = append(arr, &BulkString{Content: &v})
 	}
 	return EncodeArray(arr), nil
 }
@@ -62,13 +69,52 @@ func (*Ping) Run(_ []string) (string, error) {
 type Type interface {
 	Encode() string
 }
+type Set struct{}
+
+func (*Set) Run(data_slice []string) (string, error) {
+	key, value := data_slice[0], data_slice[1]
+	fmt.Printf("Request to Set Key %s to Value %s\n", key, value)
+	cache := hashtable.GetCache()
+	cache.Set(key, value)
+	return_val, err := cache.Get(key)
+	if err != nil {
+		fmt.Printf("Error setting up key %s\n", key)
+	}
+	fmt.Printf("Key %s Set to %s\n", key, return_val)
+	var respType Type = &SimpleString{Content: "OK"}
+	return respType.Encode(), nil
+
+}
+
+type Get struct{}
+
+func (*Get) Run(data_slice []string) (string, error) {
+	key := data_slice[0]
+	cache := hashtable.GetCache()
+	return_val, err := cache.Get(key)
+
+	if err != nil {
+		fmt.Printf("Key %s not exists", key)
+		var nullContent *string = nil
+		nullBs := BulkString{Content: nullContent}
+		return nullBs.Encode(), nil
+	}
+	fmt.Printf("Returning Value %s for  Key %s \n", return_val, key)
+	bulk := &BulkString{Content: &return_val}
+	return bulk.Encode(), nil
+
+}
 
 type BulkString struct {
-	Content string
+	Content *string
 }
 
 func (t *BulkString) Encode() string {
-	str := t.Content
+	if t.Content == nil {
+		// Return null bulk string if Content is nil
+		return fmt.Sprintf("$-1%s", ClrfDelimeter)
+	}
+	str := *t.Content
 	length := len(str)
 	return fmt.Sprintf("$%d%s%s%s", length, ClrfDelimeter, str, ClrfDelimeter)
 }
