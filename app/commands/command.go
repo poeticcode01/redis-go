@@ -72,15 +72,20 @@ type Type interface {
 type Set struct{}
 
 func (*Set) Run(data_slice []string) (string, error) {
+	fmt.Println("Data slice is ", data_slice)
 	key, value := data_slice[0], data_slice[1]
+	var px string = ""
+	if len(data_slice) > 2 {
+		_, px = data_slice[2], data_slice[3]
+	}
 	fmt.Printf("Request to Set Key %s to Value %s\n", key, value)
 	cache := hashtable.GetCache()
-	cache.Set(key, value)
-	return_val, err := cache.Get(key)
+	err := cache.Set(key, value, px)
+	// return_val, err := cache.Get(key)
 	if err != nil {
 		fmt.Printf("Error setting up key %s\n", key)
 	}
-	fmt.Printf("Key %s Set to %s\n", key, return_val)
+	fmt.Printf("Key %s Set to %s\n", key, value)
 	var respType Type = &SimpleString{Content: "OK"}
 	return respType.Encode(), nil
 
@@ -94,7 +99,7 @@ func (*Get) Run(data_slice []string) (string, error) {
 	return_val, err := cache.Get(key)
 
 	if err != nil {
-		fmt.Printf("Key %s not exists", key)
+		fmt.Printf("Key %s not exists or Expired \n", key)
 		var nullContent *string = nil
 		nullBs := BulkString{Content: nullContent}
 		return nullBs.Encode(), nil
