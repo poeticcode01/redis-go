@@ -12,6 +12,10 @@ const (
 	ClrfDelimeter = "\r\n"
 )
 
+var DEFAULTROLE string = "master"
+var MASTER_REPLID string = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+var MASTER_REPL_OFFSET int = 0
+
 func clrfSplit(str string) []string {
 	command_slice := strings.Split(str, ClrfDelimeter)
 	return command_slice
@@ -38,10 +42,32 @@ func Execute(input_buf string) (string, error) {
 		cmd = &Set{}
 	case "get":
 		cmd = &Get{}
-
+	case "info":
+		cmd = &Info{}
 	}
 
 	return (cmd).Run(command_slice[1:])
+
+}
+
+type Info struct{}
+
+func (*Info) Run(input []string) (string, error) {
+	info_argument := strings.ToLower(input[0])
+	var resp string = ""
+
+	switch info_argument {
+	case "replication":
+		return replication()
+
+	}
+	return resp, nil
+}
+
+func replication() (string, error) {
+	content := fmt.Sprintf("role:%s\nmaster_replid:%s\nmaster_repl_offset:%d", DEFAULTROLE, MASTER_REPLID, MASTER_REPL_OFFSET)
+	var respType Type = &BulkString{Content: &content}
+	return respType.Encode(), nil
 
 }
 
@@ -66,9 +92,6 @@ func (*Ping) Run(_ []string) (string, error) {
 	return respType.Encode(), nil
 }
 
-type Type interface {
-	Encode() string
-}
 type Set struct{}
 
 func (*Set) Run(data_slice []string) (string, error) {
@@ -108,6 +131,10 @@ func (*Get) Run(data_slice []string) (string, error) {
 	bulk := &BulkString{Content: &return_val}
 	return bulk.Encode(), nil
 
+}
+
+type Type interface {
+	Encode() string
 }
 
 type BulkString struct {
