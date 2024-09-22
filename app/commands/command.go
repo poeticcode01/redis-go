@@ -44,6 +44,10 @@ func Execute(input_buf string) (string, error) {
 		cmd = &Get{}
 	case "info":
 		cmd = &Info{}
+	case "replconf":
+		cmd = &ReplConf{}
+	case "psync":
+		cmd = &Psync{}
 	}
 
 	return (cmd).Run(command_slice[1:])
@@ -51,6 +55,35 @@ func Execute(input_buf string) (string, error) {
 }
 
 type Info struct{}
+type Echo struct{}
+type Ping struct{}
+type Set struct{}
+type Get struct{}
+type ReplConf struct{}
+type Psync struct{}
+
+type Type interface {
+	Encode() string
+}
+type SimpleString struct {
+	Content string
+}
+
+type BulkString struct {
+	Content *string
+}
+
+func (*Psync) Run(input []string) (string, error) {
+	var respType Type = &SimpleString{Content: fmt.Sprintf("FULLRESYNC %s %d", MASTER_REPLID, MASTER_REPL_OFFSET)}
+	return respType.Encode(), nil
+
+}
+
+func (*ReplConf) Run(input []string) (string, error) {
+	var respType Type = &SimpleString{Content: "OK"}
+	return respType.Encode(), nil
+
+}
 
 func (*Info) Run(input []string) (string, error) {
 	info_argument := strings.ToLower(input[0])
@@ -71,8 +104,6 @@ func replication() (string, error) {
 
 }
 
-type Echo struct{}
-
 func (*Echo) Run(input []string) (string, error) {
 	if len(input) == 1 {
 		bulk := &BulkString{Content: &input[0]}
@@ -82,17 +113,24 @@ func (*Echo) Run(input []string) (string, error) {
 	for _, v := range input {
 		arr = append(arr, &BulkString{Content: &v})
 	}
-	return EncodeArray(arr), nil
+	return EncodeArray(arr, true), nil
 }
 
-type Ping struct{}
+func CreateMessage(message_list []string) (string, error) {
+
+	arr := make([]*BulkString, 0, len(message_list))
+	for _, message := range message_list {
+		arr = append(arr, &BulkString{Content: &message})
+	}
+
+	// fmt.Println(fmt.Sprintf("message %v", *arr[0]))
+	return EncodeArray(arr, false), nil
+}
 
 func (*Ping) Run(_ []string) (string, error) {
 	var respType Type = &SimpleString{Content: "PONG"}
 	return respType.Encode(), nil
 }
-
-type Set struct{}
 
 func (*Set) Run(data_slice []string) (string, error) {
 	fmt.Println("Data slice is ", data_slice)
@@ -114,8 +152,6 @@ func (*Set) Run(data_slice []string) (string, error) {
 
 }
 
-type Get struct{}
-
 func (*Get) Run(data_slice []string) (string, error) {
 	key := data_slice[0]
 	cache := hashtable.GetCache()
@@ -133,14 +169,6 @@ func (*Get) Run(data_slice []string) (string, error) {
 
 }
 
-type Type interface {
-	Encode() string
-}
-
-type BulkString struct {
-	Content *string
-}
-
 func (t *BulkString) Encode() string {
 	if t.Content == nil {
 		// Return null bulk string if Content is nil
@@ -151,19 +179,25 @@ func (t *BulkString) Encode() string {
 	return fmt.Sprintf("$%d%s%s%s", length, ClrfDelimeter, str, ClrfDelimeter)
 }
 
-func EncodeArray[T Type](arr []T) string {
+func EncodeArray[T Type](arr []T, extra bool) string {
 	length := len(arr)
 	arrMark := fmt.Sprintf("*%d%s", length, ClrfDelimeter)
 	buf := bytes.NewBuffer([]byte(arrMark))
-	for _, v := range arr {
-		encoded := fmt.Sprintf("%v%s", v.Encode(), ClrfDelimeter)
-		buf.WriteString(encoded)
-	}
-	return buf.String()
-}
+	if extra {
+		for _, v := range arr {
+			encoded := fmt.Sprintf("%v%s", v.Encode(), ClrfDelimeter)
+			buf.WriteString(encoded)
+		}
 
-type SimpleString struct {
-	Content string
+	} else {
+		for _, v := range arr {
+			encoded := fmt.Sprintf("%v", v.Encode())
+			buf.WriteString(encoded)
+		}
+
+	}
+
+	return buf.String()
 }
 
 func (t *SimpleString) Encode() string {
