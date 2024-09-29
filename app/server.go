@@ -15,6 +15,25 @@ const (
 	ClrfDelimeter = "\r\n"
 )
 
+var slaves = []net.Conn{}
+
+func HandeCommandsExtra(input_buf string, conn net.Conn) {
+	command_slice := commands.Decode(input_buf)
+	fmt.Println("Command slice is  ", command_slice)
+
+	name := strings.ToLower(command_slice[0])
+
+	switch name {
+	case "psync":
+		handle_psync(input_buf, conn)
+	case "set":
+		message, _ := commands.CreateMessage(command_slice)
+		CallReplica(message)
+
+	}
+
+}
+
 func handleClient(conn net.Conn) {
 	// ensure we close the connection after we're done
 	defer conn.Close()
@@ -44,9 +63,55 @@ func handleClient(conn net.Conn) {
 			fmt.Println("Error sending message to the  client", err.Error())
 			return
 		}
+		HandeCommandsExtra(input_buf, conn)
 		// fmt.Printf("send %d bytes", n)
 
 	}
+
+}
+
+func handle_psync(input_buf string, conn net.Conn) {
+	command_slice := commands.Decode(input_buf)
+	fmt.Println("Command slice is  ", command_slice)
+
+	remoteAddr := conn.RemoteAddr().String()
+	fmt.Println("Received connection from:", remoteAddr)
+	remote_address := strings.Split(remoteAddr, ":")
+	slaves = append(slaves, conn)
+
+	commands.REPLICATION_SERVER_PORT = remote_address[len(remote_address)-1]
+
+	// name := strings.ToLower(command_slice[0])
+
+	sync_data := "$87\r\nREDIS0011\xfa\tredis-ver\x057.2.0\xfa\nredis-bits\xc0@\xfa\x05ctime\xc2m\x08\xbce\xfa\x08used-mem\xc2\xb0\xc4\x10\x00\xfa\x08aof-base\xc0\x00\xff\xf0n;\xfe\xc0\xffZ"
+	_, err := conn.Write([]byte(sync_data))
+	fmt.Println("Sent empty RDB file")
+	if err != nil {
+		fmt.Println("Error sending empty RDB to the client  ", err.Error())
+		return
+	}
+}
+
+func CallReplica(message string) {
+	// fmt.Println("Replica port", commands.REPLICATION_SERVER_PORT)
+	// conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", replica_server, commands.REPLICATION_SERVER_PORT))
+	// if err != nil {
+	// 	fmt.Println("Error in Calling replica:", err)
+	// 	os.Exit(1)
+	// }
+	// defer conn.Close()
+	for _, slave := range slaves {
+		_, err := slave.Write([]byte(message))
+
+		if err != nil {
+			fmt.Println("Error sending message to Replica", err)
+			os.Exit(1)
+
+		}
+
+	}
+
+	fmt.Println("Message Sent to replica :", message)
 
 }
 

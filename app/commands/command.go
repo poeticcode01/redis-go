@@ -15,6 +15,7 @@ const (
 var DEFAULTROLE string = "master"
 var MASTER_REPLID string = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
 var MASTER_REPL_OFFSET int = 0
+var REPLICATION_SERVER_PORT string = ""
 
 func clrfSplit(str string) []string {
 	command_slice := strings.Split(str, ClrfDelimeter)
@@ -80,6 +81,7 @@ func (*Psync) Run(input []string) (string, error) {
 }
 
 func (*ReplConf) Run(input []string) (string, error) {
+	REPLICATION_SERVER_PORT = input[1]
 	var respType Type = &SimpleString{Content: "OK"}
 	return respType.Encode(), nil
 
