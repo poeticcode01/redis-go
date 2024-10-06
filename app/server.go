@@ -16,6 +16,7 @@ const (
 )
 
 var slaves = []net.Conn{}
+var master net.Conn
 
 func HandeCommandsExtra(input_buf string, conn net.Conn) {
 	command_slice := commands.Decode(input_buf)
@@ -66,6 +67,57 @@ func handleClient(conn net.Conn) {
 		HandeCommandsExtra(input_buf, conn)
 		// fmt.Printf("send %d bytes", n)
 
+	}
+
+}
+
+func SyncWithMaster(conn net.Conn) {
+
+	fmt.Println("***Start accepting the sync commands from master***")
+
+	for {
+		buf := make([]byte, 1024)
+		_, err := conn.Read(buf)
+
+		if err != nil {
+			fmt.Println("Error reading data from  the master", err.Error())
+			return
+		}
+
+		input_buf := string(buf)
+		fmt.Println("Received sync commands from master", input_buf)
+		split := strings.Split(input_buf, ClrfDelimeter)
+		split_len := len(split)
+		fmt.Println("lenght of sync command is ", split_len)
+		fmt.Println("sync comand Split input is", split)
+		if split_len < 7 {
+			fmt.Println("Received commands not suppoted yet")
+			continue
+		}
+		command_slice := []string{}
+		strt := 0
+
+		for strt < split_len-1 {
+			temp := split[strt : strt+7]
+			temp_command := strings.Join(temp, commands.ClrfDelimeter)
+			command_slice = append(command_slice, temp_command)
+			strt += 7
+		}
+
+		fmt.Println("Command Slice", command_slice, len(command_slice))
+
+		for _, sync_command := range command_slice {
+			output, err := commands.Execute(sync_command)
+			fmt.Println("Output string is", output)
+
+			if err != nil {
+				fmt.Println("Error executing command: ", err.Error())
+			}
+			fmt.Println("Executed sync command", sync_command)
+
+		}
+
+		fmt.Println("Synced the request command from master!")
 	}
 
 }
@@ -122,7 +174,7 @@ func HandShake(master_host string, master_port string, listening_port string) {
 		fmt.Println("Error in handshaking:", err)
 		os.Exit(1)
 	}
-	defer conn.Close()
+	// defer conn.Close()
 
 	message_slice := [][]string{{"PING"},
 		{"REPLCONF", "listening-port", listening_port},
@@ -154,8 +206,10 @@ func HandShake(master_host string, master_port string, listening_port string) {
 		fmt.Println("Server response:", response)
 
 	}
-
 	fmt.Println("Successfully HandShake done and Message sent")
+
+	master = conn
+	go SyncWithMaster(master)
 
 }
 
