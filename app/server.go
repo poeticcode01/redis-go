@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/codecrafters-io/redis-starter-go/app/commands"
@@ -74,48 +75,142 @@ func handleClient(conn net.Conn) {
 func SyncWithMaster(conn net.Conn) {
 
 	fmt.Println("***Start accepting the sync commands from master***")
-
+	byte_read_so_far := 0
 	for {
 		buf := make([]byte, 1024)
-		_, err := conn.Read(buf)
+		n, err := conn.Read(buf)
 
 		if err != nil {
 			fmt.Println("Error reading data from  the master", err.Error())
 			return
 		}
 
-		input_buf := string(buf)
+		input_buf := string(buf[:n])
+
 		fmt.Println("Received sync commands from master", input_buf)
+		byte_len := len(input_buf)
+		fmt.Println("Input bytes length", byte_len)
 		split := strings.Split(input_buf, ClrfDelimeter)
 		split_len := len(split)
-		fmt.Println("lenght of sync command is ", split_len)
-		fmt.Println("sync comand Split input is", split)
-		if split_len < 7 {
-			fmt.Println("Received commands not suppoted yet")
-			continue
-		}
+		// fmt.Println("lenght of sync command is ", split_len)
+		// fmt.Println("sync comand Split input is", split)
+		// if split_len < 7 {
+		// 	fmt.Println("Received commands not suppoted yet")
+		// 	continue
+		// }
 		command_slice := []string{}
-		strt := 0
+		// strt := 0
 
-		for strt < split_len-1 {
-			temp := split[strt : strt+7]
-			temp_command := strings.Join(temp, commands.ClrfDelimeter)
-			command_slice = append(command_slice, temp_command)
-			strt += 7
+		// for strt < split_len-1 {
+		// 	temp := split[strt : strt+7]
+		// 	temp_command := strings.Join(temp, commands.ClrfDelimeter)
+		// 	command_slice = append(command_slice, temp_command)
+		// 	strt += 7
+		// }
+		const (
+			SetCommand      = "set"
+			PingCommand     = "ping"
+			ReplconfCommand = "replconf"
+		)
+
+		prv := []string{}
+		for ind := range split {
+			// fmt.Println("here", ind, split[ind])
+			if ind+1 >= split_len {
+				break
+			}
+			cur_name := strings.ToLower(split[ind+1])
+			// fmt.Println("cur_name", cur_name)
+
+			// Create a helper function to handle command processing
+			processCommand := func() {
+				temp_command := strings.Join(prv, commands.ClrfDelimeter)
+				fmt.Println("Temp command", temp_command, len(temp_command))
+				if len(temp_command) > 7 {
+					temp_prv := strings.ToLower(prv[1])
+					if temp_prv == SetCommand || temp_prv == PingCommand || temp_prv == ReplconfCommand {
+						command_slice = append(command_slice, temp_command)
+					} else {
+						fmt.Println("Unwanted commands")
+					}
+
+				} else {
+					fmt.Println("Unwanted commands")
+				}
+
+				prv = []string{split[ind]}
+				// fmt.Println("New beginning", prv, command_slice)
+			}
+
+			switch cur_name {
+			case SetCommand, PingCommand, ReplconfCommand:
+				processCommand()
+			default:
+				prv = append(prv, split[ind])
+			}
+			// fmt.Println("Running prev", prv)
 		}
-
+		temp_command := strings.Join(prv, commands.ClrfDelimeter)
+		fmt.Println("Temp command", temp_command, len(temp_command))
+		if len(temp_command) > 7 {
+			command_slice = append(command_slice, temp_command)
+		} else {
+			fmt.Println("Unwanted commands")
+		}
+		// command_slice = append(command_slice, temp_command)
 		fmt.Println("Command Slice", command_slice, len(command_slice))
 
 		for _, sync_command := range command_slice {
-			output, err := commands.Execute(sync_command)
-			fmt.Println("Output string is", output)
+			_, err := commands.Execute(sync_command)
+			fmt.Println("Current command length is ", len(sync_command))
+			// fmt.Println("Output string is", output)
 
 			if err != nil {
 				fmt.Println("Error executing command: ", err.Error())
 			}
-			fmt.Println("Executed sync command", sync_command)
+			// fmt.Println("Executed sync command", sync_command)
+
+			temp_slice := commands.Decode(sync_command)
+			name := strings.ToLower(temp_slice[0])
+			// fmt.Println("Replication command from master", name)
+			if name == "replconf" {
+				// fmt.Println("Handle ACK")
+				// *3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n$1\r\n0\r\n.
+
+				message_slice := []string{"REPLCONF", "ACK", strconv.Itoa(byte_read_so_far)}
+				output, _ := commands.CreateMessage(message_slice)
+				_, err = conn.Write([]byte(output))
+
+				if err != nil {
+					fmt.Println("Error sending ACK message to the  Master", err.Error())
+					return
+				}
+				// fmt.Println("Successfullt sent ACK")
+
+			}
+			if name == PingCommand {
+				byte_read_so_far += 14
+
+			} else if name == ReplconfCommand {
+				byte_read_so_far += 37
+			} else {
+
+				fmt.Println("Temp slice is  ", temp_slice)
+				output, _ := commands.CreateMessage(temp_slice)
+				fmt.Println("Resp len for set command is ", len(output))
+				byte_read_so_far += len(output)
+
+			}
+
+			fmt.Println("Updated byte length is", byte_read_so_far)
 
 		}
+		// if len(command_slice) >= 1 {
+		// 	fmt.Println("Bytes read so far", byte_read_so_far)
+		// 	fmt.Println("current byte size is", byte_len)
+		// 	byte_read_so_far += byte_len
+		// 	fmt.Println("Updated byte size is", byte_read_so_far)
+		// }
 
 		fmt.Println("Synced the request command from master!")
 	}

@@ -81,7 +81,9 @@ func (*Psync) Run(input []string) (string, error) {
 }
 
 func (*ReplConf) Run(input []string) (string, error) {
+	// REPLCONF GETACK *
 	REPLICATION_SERVER_PORT = input[1]
+	fmt.Println("relication command", input)
 	var respType Type = &SimpleString{Content: "OK"}
 	return respType.Encode(), nil
 
