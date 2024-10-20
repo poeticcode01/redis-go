@@ -16,6 +16,7 @@ var DEFAULTROLE string = "master"
 var MASTER_REPLID string = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
 var MASTER_REPL_OFFSET int = 0
 var REPLICATION_SERVER_PORT string = ""
+var RELICATION_COUNT int = 0
 
 func clrfSplit(str string) []string {
 	command_slice := strings.Split(str, ClrfDelimeter)
@@ -49,6 +50,8 @@ func Execute(input_buf string) (string, error) {
 		cmd = &ReplConf{}
 	case "psync":
 		cmd = &Psync{}
+	case "wait":
+		cmd = &Wait{}
 	}
 
 	return (cmd).Run(command_slice[1:])
@@ -62,6 +65,7 @@ type Set struct{}
 type Get struct{}
 type ReplConf struct{}
 type Psync struct{}
+type Wait struct{}
 
 type Type interface {
 	Encode() string
@@ -72,6 +76,11 @@ type SimpleString struct {
 
 type BulkString struct {
 	Content *string
+}
+
+func (*Wait) Run(input []string) (string, error) {
+	msg := fmt.Sprintf(":%d\r\n", RELICATION_COUNT)
+	return msg, nil
 }
 
 func (*Psync) Run(input []string) (string, error) {

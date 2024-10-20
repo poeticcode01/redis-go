@@ -1,13 +1,14 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/codecrafters-io/redis-starter-go/app/commands"
 )
@@ -18,6 +19,9 @@ const (
 
 var slaves = []net.Conn{}
 var master net.Conn
+var master_host string
+var master_port string
+var listening_port string
 
 func HandeCommandsExtra(input_buf string, conn net.Conn) {
 	command_slice := commands.Decode(input_buf)
@@ -29,12 +33,41 @@ func HandeCommandsExtra(input_buf string, conn net.Conn) {
 	case "psync":
 		handle_psync(input_buf, conn)
 	case "set":
+		// message, _ := commands.CreateMessage(command_slice)
+		// setCommandChannel <- message // Send to the channel
+		// fmt.Println("SET command received and queued for periodic sending")
 		message, _ := commands.CreateMessage(command_slice)
 		CallReplica(message)
+		// case "replconf":
+		// 	message, _ := commands.CreateMessage(command_slice)
+		// 	setCommandChannel <- message // Send to the channel
+		// 	fmt.Println("REPLCONF command received and queued for periodic sending")
+
+		// message, _ := commands.CreateMessage(command_slice)
+		// CallReplica(message)
 
 	}
 
 }
+
+// var setCommandChannel = make(chan string)
+
+// func sendSetCommandsPeriodically() {
+// 	for {
+// 		select {
+// 		case message := <-setCommandChannel:
+
+// 			// Call the replica function to send the message
+// 			// time.Sleep(5 * time.Second)
+// 			CallReplica(message)
+// 			fmt.Println("command sent to replicas:", message)
+
+// 		// Control the interval of sending commands (e.g., every 5 seconds)
+// 		default:
+// 			time.Sleep(5 * time.Second) // Wait before checking again
+// 		}
+// 	}
+// }
 
 func handleClient(conn net.Conn) {
 	// ensure we close the connection after we're done
@@ -81,8 +114,14 @@ func SyncWithMaster(conn net.Conn) {
 		n, err := conn.Read(buf)
 
 		if err != nil {
-			fmt.Println("Error reading data from  the master", err.Error())
-			return
+			if err == io.EOF {
+				fmt.Println("Connection closed by master (EOF). Attempting to reconnect...")
+				ReconnectWithMaster() // Trigger reconnection logic
+				return
+			} else {
+				fmt.Println("Error reading data from the master:", err.Error())
+				return
+			}
 		}
 
 		input_buf := string(buf[:n])
@@ -225,6 +264,7 @@ func handle_psync(input_buf string, conn net.Conn) {
 	fmt.Println("Received connection from:", remoteAddr)
 	remote_address := strings.Split(remoteAddr, ":")
 	slaves = append(slaves, conn)
+	commands.RELICATION_COUNT = len(slaves)
 
 	commands.REPLICATION_SERVER_PORT = remote_address[len(remote_address)-1]
 
@@ -248,11 +288,17 @@ func CallReplica(message string) {
 	// }
 	// defer conn.Close()
 	for _, slave := range slaves {
-		_, err := slave.Write([]byte(message))
+		sent := false
+		for !sent {
+			_, err := slave.Write([]byte(message))
 
-		if err != nil {
-			fmt.Println("Error sending message to Replica", err)
-			os.Exit(1)
+			if err != nil {
+				fmt.Println("Error sending message to Replica", err)
+				// os.Exit(1)
+				continue
+
+			}
+			sent = true
 
 		}
 
@@ -262,12 +308,36 @@ func CallReplica(message string) {
 
 }
 
-func HandShake(master_host string, master_port string, listening_port string) {
+func ReconnectWithMaster() {
+	maxRetries := 5  // Number of retries before giving up
+	backoffTime := 2 // Initial backoff time in seconds
 
+	for retries := 1; retries <= maxRetries; retries++ {
+		fmt.Printf("Reconnection attempt %d/%d...\n", retries, maxRetries)
+
+		err := HandShake(master_host, master_port, listening_port) // Re-initiate the handshake
+		if err == nil {
+			fmt.Println("Reconnection successful!")
+			return
+		}
+
+		fmt.Printf("Reconnection failed: %v. Retrying in %d seconds...\n", err, backoffTime)
+		time.Sleep(time.Duration(backoffTime) * time.Second)
+
+		// Exponential backoff strategy
+		backoffTime *= 2
+	}
+
+	fmt.Println("Failed to reconnect after several attempts. Giving up.")
+}
+
+func HandShake(master_host string, master_port string, listening_port string) error {
+	fmt.Println("handshake input ", master_host, master_port, listening_port)
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%s", master_host, master_port))
 	if err != nil {
-		fmt.Println("Error in handshaking:", err)
-		os.Exit(1)
+		return fmt.Errorf("Error in handshaking: %v", err)
+		// fmt.Println("Error in handshaking:", err)
+		// os.Exit(1)
 	}
 	// defer conn.Close()
 
@@ -284,27 +354,39 @@ func HandShake(master_host string, master_port string, listening_port string) {
 
 		_, err = conn.Write([]byte(bulk_message))
 		if err != nil {
-			fmt.Println("Error sending message over Handshake:", err)
-			os.Exit(1)
+			return fmt.Errorf("Error sending message over Handshake: %v", err)
+			// fmt.Println("Error sending message over Handshake:", err)
+			// os.Exit(1)
 
 		}
 		fmt.Println("Sent message:", message)
 
-		// Wait for the server's response
-		response, err := bufio.NewReader(conn).ReadString('\n')
+		buf := make([]byte, 1024)
+		_, err := conn.Read(buf)
+
 		if err != nil {
-			fmt.Println("Error receiving response:", err)
-			return
+			// fmt.Println("Error reading data from  the client", err.Error())
+			return fmt.Errorf("Error receiving response: %v", err)
 		}
 
+		input_buf := string(buf)
+
+		// Wait for the server's response
+		// response, err := bufio.NewReader(conn).ReadString('\n')
+		// if err != nil {
+		// 	return fmt.Errorf("Error receiving response: %v", err)
+		// 	// fmt.Println("Error receiving response:", err)
+		// 	// return
+		// }
+
 		// Print the server's response
-		fmt.Println("Server response:", response)
+		fmt.Println("Server response:", string(input_buf))
 
 	}
 	fmt.Println("Successfully HandShake done and Message sent")
 
 	master = conn
-	go SyncWithMaster(master)
+	return nil
 
 }
 
@@ -320,13 +402,15 @@ func main() {
 	if *replicaof != "master" {
 		commands.DEFAULTROLE = "slave"
 		master_info := strings.Split(*replicaof, " ")
-		master_host := master_info[0]
-		master_port := master_info[1]
+		master_host = master_info[0]
+		master_port = master_info[1]
+		listening_port = *port
 		fmt.Println("Master info", master_host, master_port)
-		go HandShake(master_host, master_port, *port)
+		HandShake(master_host, master_port, *port)
+
+		go SyncWithMaster(master)
 
 	}
-
 	// listener, err := net.Listen("tcp", "0.0.0.0:6379")
 	listener, err := net.Listen("tcp", server_port)
 	if err != nil {
@@ -349,6 +433,7 @@ func main() {
 		}
 		// Hnadle client connection
 		go handleClient(conn)
+		// Sync with master if applicable
 
 	}
 
